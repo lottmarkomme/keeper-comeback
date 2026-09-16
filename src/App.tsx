@@ -1,27 +1,41 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, ArrowLeft, CalendarDays, Check, ChevronRight, CircleUserRound, Flame, Home, LogIn, Play, ShieldCheck, Sparkles, TrendingUp, X } from 'lucide-react'
 import type { Session } from '@supabase/supabase-js'
-import { adaptWorkout, getWeekStart, makeWeek, todayIndex } from './lib/plan'
+import { Activity, Apple, CalendarDays, Check, ChevronDown, ChevronRight, CircleUserRound, ExternalLink, Flame, Home, ListChecks, LogIn, PauseCircle, Play, Plus, RotateCcw, ShoppingBasket, Sparkles, TrendingUp, Utensils, X } from 'lucide-react'
+import { aggregateShoppingList, breakfastForCycleDay, nutritionDays, nutritionForCycleDay } from './data/nutrition'
+import { addDays, buildSchedule, canPostpone, cyclePositionForDate, cycleTemplates, evaluateReadiness, getVideoForEquipment, localIso } from './lib/plan'
+import { defaultExercises, defaultProfile, initialFeedback, readLocal, STORAGE, writeLocal } from './lib/storage'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
-import type { Checkin, Completion, Workout } from './types'
+import type { Checkin, ExerciseProgress, MealLog, PrepLog, Profile, Recipe, ScheduledDay, ShoppingItem, SupplementLog, WorkoutFeedback, WorkoutVideo } from './types'
 
-type Tab = 'home' | 'plan' | 'progress' | 'profile'
-const STORAGE = { checkin: 'kc-checkin', completions: 'kc-completions', onboarded: 'kc-onboarded' }
-const today = () => new Date().toISOString().slice(0, 10)
-
-function read<T>(key: string, fallback: T): T {
-  try { return JSON.parse(localStorage.getItem(key) || '') as T } catch { return fallback }
-}
+type Tab = 'home' | 'cycle' | 'nutrition' | 'progress' | 'profile'
+type ShoppingWindow = 1 | 3 | 8
+const TODAY = () => localIso()
 
 export default function App() {
   const [tab, setTab] = useState<Tab>('home')
-  const [selected, setSelected] = useState<Workout | null>(null)
-  const [showCheckin, setShowCheckin] = useState(false)
-  const [showOnboarding, setShowOnboarding] = useState(() => !read(STORAGE.onboarded, false))
   const [session, setSession] = useState<Session | null>(null)
-  const [checkin, setCheckin] = useState<Checkin | undefined>(() => read<Record<string, Checkin>>(STORAGE.checkin, {})[today()])
-  const [completions, setCompletions] = useState<Completion[]>(() => read(STORAGE.completions, []))
+  const [showOnboarding, setShowOnboarding] = useState(() => !readLocal(STORAGE.onboarded, false))
+  const [checkins, setCheckins] = useState<Record<string, Checkin>>(() => readLocal(STORAGE.checkins, {}))
+  const [feedback, setFeedback] = useState<WorkoutFeedback[]>(initialFeedback)
+  const [postponed, setPostponed] = useState<string[]>(() => readLocal(STORAGE.postponed, []))
+  const [mealLogs, setMealLogs] = useState<MealLog[]>(() => readLocal(STORAGE.meals, []))
+  const [prepLogs, setPrepLogs] = useState<PrepLog[]>(() => readLocal(STORAGE.prep, []))
+  const [shoppingChecks, setShoppingChecks] = useState<Record<string, boolean>>(() => readLocal(STORAGE.shopping, {}))
+  const [profile, setProfile] = useState<Profile>(() => readLocal(STORAGE.profile, defaultProfile))
+  const [exercises, setExercises] = useState<ExerciseProgress[]>(() => readLocal(STORAGE.exercises, defaultExercises))
+  const [supplements, setSupplements] = useState<SupplementLog[]>(() => readLocal(STORAGE.supplements, []))
+  const [checkinOpen, setCheckinOpen] = useState(false)
+  const [video, setVideo] = useState<{ day: ScheduledDay; video: WorkoutVideo } | null>(null)
+  const [feedbackDay, setFeedbackDay] = useState<ScheduledDay | null>(null)
   const [toast, setToast] = useState('')
+
+  const date = TODAY()
+  const position = cyclePositionForDate(date, postponed)
+  const schedule = useMemo(() => buildSchedule(addDays(date, -Math.min(7, position.cycleDay - 1)), 16, postponed, feedback), [date, postponed, feedback, position.cycleDay])
+  const today = buildSchedule(date, 1, postponed, feedback)[0]
+  const tomorrow = buildSchedule(addDays(date, 1), 1, postponed, feedback)[0]
+  const todayCheckin = checkins[date]
+  const readiness = todayCheckin ? evaluateReadiness(todayCheckin, today) : null
 
   useEffect(() => {
     if (!supabase) return
@@ -29,146 +43,152 @@ export default function App() {
     const { data } = supabase.auth.onAuthStateChange((_event, next) => setSession(next))
     return () => data.subscription.unsubscribe()
   }, [])
+  useEffect(() => { writeLocal(STORAGE.checkins, checkins) }, [checkins])
+  useEffect(() => { writeLocal(STORAGE.feedback, feedback) }, [feedback])
+  useEffect(() => { writeLocal(STORAGE.postponed, postponed) }, [postponed])
+  useEffect(() => { writeLocal(STORAGE.meals, mealLogs) }, [mealLogs])
+  useEffect(() => { writeLocal(STORAGE.prep, prepLogs) }, [prepLogs])
+  useEffect(() => { writeLocal(STORAGE.shopping, shoppingChecks) }, [shoppingChecks])
+  useEffect(() => { writeLocal(STORAGE.profile, profile) }, [profile])
+  useEffect(() => { writeLocal(STORAGE.exercises, exercises) }, [exercises])
+  useEffect(() => { writeLocal(STORAGE.supplements, supplements) }, [supplements])
+  useEffect(() => { if (!toast) return; const id = window.setTimeout(() => setToast(''), 3200); return () => clearTimeout(id) }, [toast])
+  useEffect(() => { if (session) void hydrateFromCloud(session) }, [session])
 
-  useEffect(() => { localStorage.setItem(STORAGE.completions, JSON.stringify(completions)) }, [completions])
-  useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 3000); return () => clearTimeout(id) }, [toast])
+  async function hydrateFromCloud(active: Session) {
+    if (!supabase) return
+    const uid = active.user.id
+    const [p, eq, ci, wf, ml, mp, ep, st] = await Promise.all([
+      supabase.from('profiles').select('*').eq('user_id', uid).maybeSingle(),
+      supabase.from('equipment_profile').select('*').eq('user_id', uid).maybeSingle(),
+      supabase.from('daily_checkins').select('*').eq('user_id', uid),
+      supabase.from('workout_feedback').select('*').eq('user_id', uid),
+      supabase.from('meal_logs').select('*').eq('user_id', uid),
+      supabase.from('meal_prep_tasks').select('*').eq('user_id', uid),
+      supabase.from('exercise_progress').select('*').eq('user_id', uid).order('recorded_at'),
+      supabase.from('supplement_tracking').select('*').eq('user_id', uid)
+    ])
+    if (p.data) setProfile(old => ({ ...old, age:p.data.age, heightCm:p.data.height_cm, weightKg:Number(p.data.weight_kg), plantBased:p.data.plant_based, vegan:p.data.vegan, equipment: eq.data ? { pullupBar:eq.data.pullup_bar, bands:eq.data.resistance_bands, dipBars:eq.data.dip_bars, mat:eq.data.mat, none:eq.data.no_equipment } : old.equipment }))
+    if (ci.data?.length) setCheckins(old => ({ ...old, ...Object.fromEntries(ci.data.map(item => [item.checkin_date, { energy:item.energy, sleep:item.sleep_quality, soreness:item.soreness, fatigue:item.fatigue, pain:item.pain, backPain:item.back_pain, neckPain:item.neck_pain, motivation:item.motivation }])) }))
+    if (wf.data?.length) setFeedback(old => mergeBy(old, wf.data.map(item => ({ date:item.feedback_date, cycleDay:item.cycle_day, workoutKey:`cycle-${item.cycle_day}`, complete:item.completed, minutes:cycleTemplates[item.cycle_day - 1].minutes, intensity:item.intensity ?? 5, earlyStops:item.early_stops, extraBreaks:item.extra_breaks, legsFatigue:item.legs_fatigue, upperFatigue:item.upper_fatigue, conditioning:item.conditioning, technique:item.technique, kneeFeeling:item.knee_feeling, stiffnessBefore:item.stiffness_before, stiffnessAfter:item.stiffness_after, notes:item.notes })), item => `${item.date}-${item.cycleDay}`))
+    if (ml.data?.length) setMealLogs(old => mergeBy(old, ml.data.map(item => ({ date:item.log_date, recipeId:item.recipe_key, eaten:item.eaten })), item => `${item.date}-${item.recipeId}`))
+    if (mp.data?.length) setPrepLogs(old => mergeBy(old, mp.data.map(item => ({ date:item.task_date, recipeId:item.recipe_key, done:item.done })), item => `${item.date}-${item.recipeId}`))
+    if (ep.data?.length) setExercises(old => old.map(ex => { const rows = ep.data.filter(item => item.exercise_key === ex.key); const latest = rows.at(-1); return latest ? { ...ex, previous:ex.current, current:Number(latest.value), record:Math.max(ex.record, ...rows.map(item => Number(item.value))) } : ex }))
+    if (st.data?.length) setSupplements(st.data.map(item => ({ date:item.log_date, creatine:Number(item.creatine_grams) >= 3, proteinShake:item.protein_shake })))
+    await seedAnchorBenchmark(uid)
+    setToast('Lokale und sichere Cloud-Daten synchronisiert')
+  }
 
-  const weekStart = getWeekStart()
-  const weekCompletions = completions.filter(c => new Date(c.date) >= weekStart).length
-  const previousRate = Math.min(1, completions.length / 7)
-  const weekNumber = Math.max(0, Math.floor((Date.now() - new Date('2026-09-14').getTime()) / 604800000))
-  const week = useMemo(() => makeWeek(weekNumber, previousRate), [weekNumber, previousRate])
-  const baseToday = week[todayIndex()]
-  const adapted = adaptWorkout(baseToday, checkin)
+  async function seedAnchorBenchmark(uid: string) {
+    if (!supabase) return
+    const anchor = feedback.find(item => item.date === '2026-09-15' && item.cycleDay === 1)
+    if (!anchor) return
+    await supabase.from('workout_sessions').upsert({ user_id:uid, session_date:anchor.date, workout_key:'cycle-1-hiit', title:'50 Min Full Body HIIT', status:'completed', planned_minutes:50, actual_minutes:50, perceived_effort:anchor.intensity, notes:anchor.notes, cycle_day:1, video_id:'1s_0rUUo0A0' }, { onConflict:'user_id,session_date,workout_key' })
+    await supabase.from('workout_feedback').upsert(feedbackRow(uid, anchor), { onConflict:'user_id,feedback_date,cycle_day' })
+  }
 
-  async function saveCheckin(next: Checkin) {
-    const all = read<Record<string, Checkin>>(STORAGE.checkin, {})
-    all[today()] = next
-    localStorage.setItem(STORAGE.checkin, JSON.stringify(all))
-    setCheckin(next)
-    setShowCheckin(false)
-    setToast('Training für heute angepasst')
+  async function saveCheckin(value: Checkin) {
+    setCheckins(old => ({ ...old, [date]:value })); setCheckinOpen(false); setToast('Tagesform gespeichert – Empfehlung aktualisiert')
+    if (session && supabase) await supabase.from('daily_checkins').upsert({ user_id:session.user.id, checkin_date:date, energy:value.energy, sleep_quality:value.sleep, soreness:value.soreness, fatigue:value.fatigue, pain:value.pain, back_pain:value.backPain, neck_pain:value.neckPain, motivation:value.motivation }, { onConflict:'user_id,checkin_date' })
+  }
+
+  async function saveFeedback(value: WorkoutFeedback) {
+    setFeedback(old => mergeBy(old, [value], item => `${item.date}-${item.cycleDay}`)); setFeedbackDay(null); setVideo(null); setToast(value.complete ? 'Einheit und Feedback gespeichert' : 'Feedback gespeichert')
     if (session && supabase) {
-      await supabase.from('daily_checkins').upsert({
-        user_id: session.user.id, checkin_date: today(), energy: next.energy, sleep_quality: next.sleep,
-        soreness: next.soreness, back_pain: next.backPain, neck_pain: next.neckPain
-      }, { onConflict: 'user_id,checkin_date' })
+      const template = cycleTemplates[value.cycleDay - 1]
+      await supabase.from('workout_sessions').upsert({ user_id:session.user.id, session_date:value.date, workout_key:value.workoutKey, title:template.title, status:value.complete ? 'completed':'shortened', planned_minutes:template.minutes || 1, actual_minutes:value.minutes, perceived_effort:value.intensity, notes:value.notes ?? '', cycle_day:value.cycleDay, video_id:getVideoForEquipment(template, profile.equipment)?.id }, { onConflict:'user_id,session_date,workout_key' })
+      await supabase.from('workout_feedback').upsert(feedbackRow(session.user.id, value), { onConflict:'user_id,feedback_date,cycle_day' })
     }
   }
 
-  async function finishWorkout(workout: Workout) {
-    if (completions.some(c => c.date === today() && c.workoutKey === workout.key)) {
-      setToast('Diese Einheit ist heute schon erledigt')
-      return
-    }
-    const entry = { date: today(), workoutKey: workout.key, minutes: workout.minutes, effort: workout.intensity === 'Leicht' ? 4 : 6 }
-    setCompletions(old => [...old, entry])
-    setSelected(null)
-    setToast('Stark – Einheit gespeichert!')
-    if (session && supabase) {
-      await supabase.from('workout_sessions').upsert({
-        user_id: session.user.id, session_date: today(), workout_key: workout.key, title: workout.title,
-        planned_minutes: workout.minutes, actual_minutes: workout.minutes, perceived_effort: entry.effort, status: 'completed'
-      }, { onConflict: 'user_id,session_date,workout_key' })
-    }
+  async function postponeTraining() {
+    if (!canPostpone(today) || postponed.includes(date)) return
+    setPostponed(old => [...old, date]); setToast('Training verschoben – der Folgeplan rückt einen Tag weiter')
+    if (session && supabase) await supabase.from('training_days').upsert({ user_id:session.user.id, scheduled_date:date, original_date:date, cycle_day:today.day, workout_type:today.kind, status:'postponed', video_id:getVideoForEquipment(today, profile.equipment)?.id, postponement_reason:readiness?.explanation ?? 'Manuell verschoben' }, { onConflict:'user_id,scheduled_date,cycle_day' })
   }
 
-  if (showOnboarding) return <Onboarding onDone={() => { localStorage.setItem(STORAGE.onboarded, 'true'); setShowOnboarding(false) }} />
-
-  return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-mark">KC</div>
-        <div><p className="eyebrow">KEEPER COMEBACK</p><h1>{tab === 'home' ? 'Dein Heute' : tab === 'plan' ? 'Wochenplan' : tab === 'progress' ? 'Fortschritt' : 'Dein Profil'}</h1></div>
-        <button className="avatar" onClick={() => setTab('profile')} aria-label="Profil öffnen"><CircleUserRound /></button>
-      </header>
-
-      <main>
-        {tab === 'home' && <HomeView workout={adapted.workout} note={adapted.note} checkin={checkin} weekCompletions={weekCompletions} onCheckin={() => setShowCheckin(true)} onOpen={() => setSelected(adapted.workout)} />}
-        {tab === 'plan' && <PlanView week={week} completions={completions} onOpen={setSelected} />}
-        {tab === 'progress' && <ProgressView completions={completions} />}
-        {tab === 'profile' && <ProfileView session={session} onToast={setToast} onReset={() => { localStorage.clear(); location.reload() }} />}
-      </main>
-
-      <nav className="bottom-nav">
-        <NavButton active={tab === 'home'} icon={<Home />} label="Heute" onClick={() => setTab('home')} />
-        <NavButton active={tab === 'plan'} icon={<CalendarDays />} label="Plan" onClick={() => setTab('plan')} />
-        <NavButton active={tab === 'progress'} icon={<TrendingUp />} label="Fortschritt" onClick={() => setTab('progress')} />
-        <NavButton active={tab === 'profile'} icon={<CircleUserRound />} label="Profil" onClick={() => setTab('profile')} />
-      </nav>
-
-      {showCheckin && <CheckinSheet initial={checkin} onClose={() => setShowCheckin(false)} onSave={saveCheckin} />}
-      {selected && <WorkoutSheet workout={selected} onClose={() => setSelected(null)} onFinish={finishWorkout} />}
-      {toast && <div className="toast"><Check size={18} />{toast}</div>}
-    </div>
-  )
-}
-
-function HomeView({ workout, note, checkin, weekCompletions, onCheckin, onOpen }: { workout: Workout; note: string; checkin?: Checkin; weekCompletions: number; onCheckin: () => void; onOpen: () => void }) {
-  return <div className="page-stack">
-    <section className="hero-card">
-      <div className="hero-orb"><Activity /></div>
-      <p className="eyebrow lime">HEUTE · {workout.intensity.toUpperCase()}</p>
-      <h2>{workout.title}</h2><p>{workout.subtitle}</p>
-      <div className="stat-row"><span>{workout.minutes} MIN</span><span>{workout.exercises.length} ÜBUNGEN</span><span>RPE ≤ 6</span></div>
-      <button className="primary" onClick={onOpen}><Play size={18} fill="currentColor" /> Einheit ansehen</button>
-    </section>
-    <section className="adapt-card"><Sparkles size={20} /><div><strong>{checkin ? 'Für dich angepasst' : 'Wie geht es dir heute?'}</strong><p>{note}</p></div><button onClick={onCheckin}>{checkin ? 'Ändern' : 'Check-in'} <ChevronRight size={16} /></button></section>
-    <section><div className="section-head"><div><p className="eyebrow">DIESE WOCHE</p><h3>Konstanz vor Vollgas</h3></div><span>{weekCompletions}/7</span></div>
-      <div className="week-dots">{['M','D','M','D','F','S','S'].map((day, index) => <div key={index} className={index < weekCompletions ? 'done' : index === todayIndex() ? 'today' : ''}><i>{index < weekCompletions && <Check size={14}/>}</i><small>{day}</small></div>)}</div>
-    </section>
-    <div className="coach-note"><ShieldCheck /><p><strong>Comeback-Regel:</strong> Hör auf, wenn du das Gefühl hast, du könntest noch etwas. In den ersten Wochen gewinnen wir durch Wiederholen, nicht durch Zerstören.</p></div>
-  </div>
-}
-
-function PlanView({ week, completions, onOpen }: { week: Workout[]; completions: Completion[]; onOpen: (w: Workout) => void }) {
-  return <div className="page-stack"><div className="intro-copy"><p>WOCHE {Math.max(1, Math.ceil((Date.now() - new Date('2026-09-14').getTime()) / 604800000) + 1)}</p><h2>Zurück zur Basis</h2><span>Maximal 45 Minuten · angepasst an deine Tagesform</span></div>
-    <div className="plan-list">{week.map((workout, index) => { const done = completions.some(c => c.workoutKey === workout.key); return <button key={workout.key} className={`plan-row ${index === todayIndex() ? 'current' : ''}`} onClick={() => onOpen(workout)}><div className="date-box"><b>{workout.day.slice(0,2)}</b><span>{index + 1}</span></div><div><small>{workout.focus}</small><strong>{workout.title}</strong><span>{workout.minutes} Min. · {workout.intensity}</span></div>{done ? <span className="done-badge"><Check /></span> : <ChevronRight />}</button> })}</div>
-  </div>
-}
-
-function ProgressView({ completions }: { completions: Completion[] }) {
-  const minutes = completions.reduce((sum, item) => sum + item.minutes, 0)
-  const lastSeven = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - 6 + i); return { label: ['So','Mo','Di','Mi','Do','Fr','Sa'][d.getDay()], value: completions.filter(c => c.date === d.toISOString().slice(0,10)).reduce((s,c) => s+c.minutes,0) } })
-  return <div className="page-stack"><section className="progress-hero"><div><p className="eyebrow lime">DEIN COMEBACK</p><h2>{completions.length} Einheiten</h2><span>Jeder kleine Haken zählt.</span></div><Flame /></section>
-    <div className="metric-grid"><article><span>Trainingszeit</span><b>{minutes}</b><small>Minuten gesamt</small></article><article><span>Ø Einheit</span><b>{completions.length ? Math.round(minutes/completions.length) : 0}</b><small>Minuten</small></article></div>
-    <section className="chart-card"><div className="section-head"><div><p className="eyebrow">LETZTE 7 TAGE</p><h3>Bewegungsminuten</h3></div></div><div className="bars">{lastSeven.map((d,i) => <div key={i}><span style={{height: `${Math.max(5, d.value/45*100)}%`}}></span><small>{d.label}</small></div>)}</div></section>
-    <div className="milestone"><div><Check /></div><p><strong>Nächstes Ziel</strong><br/>Drei Einheiten in einer Woche abschließen</p><span>{Math.min(3, completions.length)}/3</span></div>
-  </div>
-}
-
-function ProfileView({ session, onToast, onReset }: { session: Session | null; onToast: (s:string)=>void; onReset:()=>void }) {
-  const [email, setEmail] = useState('')
-  const [sending, setSending] = useState(false)
-  async function signIn() {
-    if (!supabase || !email) return
-    setSending(true)
-    const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href.split('#')[0] } })
-    setSending(false); onToast(error ? error.message : 'Login-Link wurde gesendet')
+  async function toggleMeal(recipe: Recipe, dayDate = date) {
+    const existing = mealLogs.find(item => item.date === dayDate && item.recipeId === recipe.id)
+    const next = { date:dayDate, recipeId:recipe.id, eaten:!existing?.eaten }
+    setMealLogs(old => mergeBy(old, [next], item => `${item.date}-${item.recipeId}`))
+    if (session && supabase) await supabase.from('meal_logs').upsert({ user_id:session.user.id, log_date:dayDate, recipe_key:recipe.id, eaten:next.eaten }, { onConflict:'user_id,log_date,recipe_key' })
   }
-  return <div className="page-stack"><section className="profile-card"><div className="profile-icon"><CircleUserRound /></div><h2>{session?.user.email || 'Lokales Profil'}</h2><p>{session ? 'Dein Fortschritt wird sicher synchronisiert.' : 'Deine Daten bleiben aktuell auf diesem Gerät.'}</p></section>
-    {!session && <section className="login-card"><p className="eyebrow">SYNC AKTIVIEREN</p><h3>Mit E‑Mail anmelden</h3><p>Du erhältst einen sicheren Login-Link. Kein Passwort nötig.</p><input value={email} onChange={e => setEmail(e.target.value)} type="email" placeholder="deine@email.de"/><button className="primary" onClick={signIn} disabled={!isSupabaseConfigured || sending}><LogIn size={18}/>{sending ? 'Wird gesendet…' : 'Login-Link senden'}</button></section>}
-    <section className="settings-list"><div><span>Trainingslimit</span><strong>45 Minuten</strong></div><div><span>Schwerpunkt</span><strong>Fitness · Keeper · Mobility</strong></div><div><span>Startniveau</span><strong>Wiedereinstieg</strong></div></section>
-    <button className="danger-link" onClick={onReset}>Lokale Trainingsdaten zurücksetzen</button>
-    <p className="legal-note">Kein Medizinprodukt und kein Ersatz für ärztliche Untersuchung. Bei neuen starken Schmerzen, Taubheit/Schwäche, Problemen mit Blase oder Darm, Fieber oder Beschwerden nach einem Unfall bitte sofort medizinisch abklären.</p>
-  </div>
+
+  async function togglePrep(recipe: Recipe, taskDate = date, targetDate = addDays(date, 1)) {
+    const existing = prepLogs.find(item => item.date === taskDate && item.recipeId === recipe.id)
+    const next = { date:taskDate, recipeId:recipe.id, done:!existing?.done }
+    setPrepLogs(old => mergeBy(old, [next], item => `${item.date}-${item.recipeId}`))
+    if (session && supabase) await supabase.from('meal_prep_tasks').upsert({ user_id:session.user.id, task_date:taskDate, target_date:targetDate, recipe_key:recipe.id, done:next.done }, { onConflict:'user_id,task_date,target_date,recipe_key' })
+  }
+
+  async function saveProfile(next: Profile) {
+    setProfile(next); setToast('Profil und Equipment gespeichert')
+    if (session && supabase) await Promise.all([
+      supabase.from('profiles').upsert({ user_id:session.user.id, age:next.age, height_cm:next.heightCm, weight_kg:next.weightKg, plant_based:next.plantBased, vegan:next.vegan }, { onConflict:'user_id' }),
+      supabase.from('equipment_profile').upsert({ user_id:session.user.id, pullup_bar:next.equipment.pullupBar, resistance_bands:next.equipment.bands, dip_bars:next.equipment.dipBars, mat:next.equipment.mat, no_equipment:next.equipment.none }, { onConflict:'user_id' }),
+      supabase.from('nutrition_targets').upsert({ user_id:session.user.id, protein_min:Math.max(1,next.proteinTarget - 10), protein_max:next.proteinTarget + 10 }, { onConflict:'user_id' })
+    ])
+  }
+
+  async function recordExercise(item: ExerciseProgress, value: number) {
+    setExercises(old => old.map(ex => ex.key === item.key ? { ...ex, previous:ex.current, current:value, record:Math.max(ex.record,value) } : ex)); setToast(`${item.label}: Leistung gespeichert`)
+    if (session && supabase) await supabase.from('exercise_progress').insert({ user_id:session.user.id, exercise_key:item.key, value, unit:item.unit === 'Sek.' ? 'seconds':'reps' })
+  }
+  async function toggleSupplement(key: 'creatine' | 'proteinShake') {
+    const current = supplements.find(item => item.date === date) ?? { date, creatine:false, proteinShake:false }
+    const next = { ...current, [key]:!current[key] }
+    setSupplements(old => mergeBy(old, [next], item => item.date))
+    if (session && supabase) await supabase.from('supplement_tracking').upsert({ user_id:session.user.id, log_date:date, creatine_grams:next.creatine ? 5:0, protein_shake:next.proteinShake }, { onConflict:'user_id,log_date' })
+  }
+
+  if (showOnboarding) return <Onboarding onDone={() => { writeLocal(STORAGE.onboarded, true); setShowOnboarding(false) }} />
+  const title = { home:'Dein Heute', cycle:'Trainingszyklus', nutrition:'Ernährung', progress:'Fortschritt', profile:'Profil' }[tab]
+  return <div className="app-shell"><header className="topbar"><div className="brand-mark">KC</div><div><p className="eyebrow">KEEPER COMEBACK</p><h1>{title}</h1></div><button className="avatar" onClick={() => setTab('profile')} aria-label="Profil"><CircleUserRound /></button></header><main>
+    {tab === 'home' && <HomeView today={today} tomorrow={tomorrow} schedule={schedule} readiness={readiness} checkin={todayCheckin} profile={profile} mealLogs={mealLogs} prepLogs={prepLogs} onCheckin={() => setCheckinOpen(true)} onStart={(day, selectedVideo) => setVideo({ day, video:selectedVideo })} onFeedback={setFeedbackDay} onPostpone={postponeTraining} onMeal={toggleMeal} onPrep={togglePrep} />}
+    {tab === 'cycle' && <CycleView schedule={schedule} profile={profile} feedback={feedback} onStart={(day, selectedVideo) => setVideo({ day, video:selectedVideo })} />}
+    {tab === 'nutrition' && <NutritionView currentDay={today.day} mealLogs={mealLogs} prepLogs={prepLogs} shoppingChecks={shoppingChecks} onMeal={toggleMeal} onPrep={togglePrep} onShopping={setShoppingChecks} />}
+    {tab === 'progress' && <ProgressView feedback={feedback} exercises={exercises} mealLogs={mealLogs} supplements={supplements} profile={profile} onExercise={recordExercise} onSupplement={toggleSupplement} />}
+    {tab === 'profile' && <ProfileView session={session} profile={profile} onSave={saveProfile} onToast={setToast} />}
+  </main><nav className="bottom-nav"><Nav active={tab==='home'} icon={<Home/>} label="Heute" onClick={()=>setTab('home')}/><Nav active={tab==='cycle'} icon={<CalendarDays/>} label="Zyklus" onClick={()=>setTab('cycle')}/><Nav active={tab==='nutrition'} icon={<Apple/>} label="Ernährung" onClick={()=>setTab('nutrition')}/><Nav active={tab==='progress'} icon={<TrendingUp/>} label="Progress" onClick={()=>setTab('progress')}/><Nav active={tab==='profile'} icon={<CircleUserRound/>} label="Profil" onClick={()=>setTab('profile')}/></nav>
+    {checkinOpen && <CheckinSheet initial={todayCheckin} onClose={()=>setCheckinOpen(false)} onSave={saveCheckin}/>} {video && <VideoSheet day={video.day} video={video.video} onClose={()=>setVideo(null)} onDone={()=>setFeedbackDay(video.day)}/>} {feedbackDay && <FeedbackSheet day={feedbackDay} initial={feedback.find(item=>item.date===feedbackDay.date&&item.cycleDay===feedbackDay.day)} onClose={()=>setFeedbackDay(null)} onSave={saveFeedback}/>} {toast && <div className="toast"><Check size={18}/>{toast}</div>}</div>
 }
 
-function NavButton({ active, icon, label, onClick }: { active:boolean; icon:React.ReactNode; label:string; onClick:()=>void }) { return <button className={active ? 'active' : ''} onClick={onClick}>{icon}<span>{label}</span></button> }
-
-function CheckinSheet({ initial, onClose, onSave }: { initial?:Checkin; onClose:()=>void; onSave:(c:Checkin)=>void }) {
-  const [values, setValues] = useState<Checkin>(initial || { energy:3, sleep:3, soreness:2, backPain:2, neckPain:2 })
-  return <div className="sheet-backdrop" onMouseDown={onClose}><div className="sheet" onMouseDown={e=>e.stopPropagation()}><div className="sheet-head"><div><p className="eyebrow">60-SEKUNDEN-CHECK</p><h2>Wie ist dein Körper heute?</h2></div><button onClick={onClose}><X /></button></div>
-    <Slider label="Energie" value={values.energy} min={1} max={5} onChange={v=>setValues({...values,energy:v})}/><Slider label="Schlafqualität" value={values.sleep} min={1} max={5} onChange={v=>setValues({...values,sleep:v})}/><Slider label="Muskelkater" value={values.soreness} min={0} max={10} onChange={v=>setValues({...values,soreness:v})}/><Slider label="Rückenschmerz" value={values.backPain} min={0} max={10} onChange={v=>setValues({...values,backPain:v})}/><Slider label="Nackenschmerz" value={values.neckPain} min={0} max={10} onChange={v=>setValues({...values,neckPain:v})}/>
-    <button className="primary" onClick={()=>onSave(values)}>Training anpassen</button></div></div>
+function HomeView({ today, tomorrow, schedule, readiness, checkin, profile, mealLogs, prepLogs, onCheckin, onStart, onFeedback, onPostpone, onMeal, onPrep }:{ today:ScheduledDay; tomorrow:ScheduledDay; schedule:ScheduledDay[]; readiness:ReturnType<typeof evaluateReadiness>|null; checkin?:Checkin; profile:Profile; mealLogs:MealLog[]; prepLogs:PrepLog[]; onCheckin:()=>void; onStart:(d:ScheduledDay,v:WorkoutVideo)=>void; onFeedback:(d:ScheduledDay)=>void; onPostpone:()=>void; onMeal:(r:Recipe)=>void; onPrep:(r:Recipe)=>void }) {
+  const selectedVideo = getVideoForEquipment(today, profile.equipment), tomorrowVideo = getVideoForEquipment(tomorrow, profile.equipment), meals = nutritionForCycleDay(today.day).meals
+  const eaten = meals.filter(m => mealLogs.some(l => l.date===today.date&&l.recipeId===m.id&&l.eaten)), kcal = eaten.reduce((s,m)=>s+m.kcal,0), protein = eaten.reduce((s,m)=>s+m.protein,0), nextBreakfast = breakfastForCycleDay(tomorrow.day), prepared = prepLogs.some(l=>l.date===today.date&&l.recipeId===nextBreakfast.id&&l.done)
+  return <div className="page-stack"><section className={`today-hero kind-${today.kind}`}><div className="hero-top"><span>{today.emoji}</span><div><p className="eyebrow">HEUTE · TAG {today.day} VON 8</p><h2>{today.shortTitle}</h2></div></div><div className="hero-metrics"><span><b>{today.intensity}</b>Intensität</span><span><b>{today.minutes || '–'}</b>{today.minutes ? 'Minuten':'Ruhetag'}</span></div>{today.kind==='rest' && <p className="rest-message">Heute ist Regeneration Training. Schlaf, Ernährung und Flüssigkeit sind genug.</p>}{selectedVideo ? <button className="primary" onClick={()=>onStart(today,selectedVideo)}><Play fill="currentColor"/>Workout starten</button>:<button className="primary calm" onClick={()=>onFeedback(today)}><Check/>Rest Day festhalten</button>}</section>
+    {selectedVideo && <VideoCard video={selectedVideo} featured onStart={()=>onStart(today,selectedVideo)}/>}<section className={`readiness ${readiness?.level ?? 'neutral'}`}><div className="traffic"/><div><p className="eyebrow">DAILY CHECK-IN</p><h3>{readiness?.title ?? 'Wie geht es dir heute?'}</h3><p>{readiness?.explanation ?? 'Schlaf, Energie, Muskelkater, Erschöpfung, Beschwerden und Motivation bestimmen die Empfehlung transparent.'}</p></div><button className="text-button" onClick={onCheckin}>{checkin?'Ändern':'Jetzt eintragen'} <ChevronRight/></button>{readiness?.level==='red'&&canPostpone(today)&&<button className="secondary full" onClick={onPostpone}><PauseCircle/>Training verschieben</button>}</section>
+    <section className="card"><SectionTitle eyebrow="HEUTIGE ERNÄHRUNG" title={`${eaten.length} / ${meals.length} Mahlzeiten`} action={`${protein} / ${profile.proteinTarget} g Protein`}/><div className="macro-progress"><i style={{width:`${Math.min(100,protein/profile.proteinTarget*100)}%`}}/></div><p className="muted">ca. {kcal.toLocaleString('de-DE')} kcal · aktueller Zielbereich {nutritionForCycleDay(today.day).kcalRange}</p><div className="compact-meals">{meals.map(meal=><button key={meal.id} onClick={()=>onMeal(meal)} className={mealLogs.some(l=>l.date===today.date&&l.recipeId===meal.id&&l.eaten)?'done':''}><span>{meal.meal}</span><b>{meal.title}</b><i>{meal.protein} g Protein</i><Check/></button>)}</div></section>
+    <section className="prep-card"><div className={prepared?'check-circle done':'check-circle'}><Check/></div><div><p className="eyebrow">HEUTE ABEND VORBEREITEN</p><h3>{nextBreakfast.title}</h3><p>{nextBreakfast.minutes} Minuten · Frühstück für morgen</p></div><button className="secondary" onClick={()=>onPrep(nextBreakfast)}>{prepared?'Vorbereitet':'Als vorbereitet markieren'}</button></section>
+    <section><SectionTitle eyebrow="MORGEN" title={`Tag ${tomorrow.day} – ${tomorrow.shortTitle}`}/>{tomorrowVideo?<VideoCard video={tomorrowVideo} compact onStart={()=>onStart(tomorrow,tomorrowVideo)}/>:<div className="rest-card">😴 Kein verpflichtendes Workout · Regeneration ohne schlechtes Gewissen</div>}</section>
+    <section><SectionTitle eyebrow="DEIN 8-TAGE-ZYKLUS" title="Deine nächsten Tage"/><div className="cycle-strip">{schedule.slice(0,8).map(day=><article key={day.date} className={`${day.date===today.date?'current':''} ${day.completed?'complete':''}`}><small>{relativeDate(day.date,today.date)}</small><span>{day.completed?'✓':day.emoji}</span><b>Tag {day.day}</b><p>{day.shortTitle}</p></article>)}</div></section></div>
 }
 
-function Slider({label,value,min,max,onChange}:{label:string;value:number;min:number;max:number;onChange:(v:number)=>void}) { return <label className="slider"><div><span>{label}</span><b>{value}/{max}</b></div><input type="range" min={min} max={max} value={value} onChange={e=>onChange(Number(e.target.value))}/></label> }
+function CycleView({ schedule, profile, feedback, onStart }:{ schedule:ScheduledDay[]; profile:Profile; feedback:WorkoutFeedback[]; onStart:(d:ScheduledDay,v:WorkoutVideo)=>void }) { return <div className="page-stack"><div className="intro-copy"><p>FORTLAUFEND STATT KALENDERWOCHE</p><h2>Reihenfolge vor Datum</h2><span>Verschobene Einheiten gehen nicht verloren. Recovery und Rest bleiben Teil des Plans.</span></div><div className="timeline-list">{schedule.slice(0,10).map(day=>{ const v=getVideoForEquipment(day,profile.equipment), done=feedback.some(f=>f.date===day.date&&f.complete); return <article key={day.date} className={day.isToday?'current':''}><div className="day-node">{done?<Check/>:<span>{day.emoji}</span>}</div><div><small>{formatDate(day.date)} · Tag {day.day} von 8</small><h3>{day.title}</h3><p>{day.intensity} · {day.minutes?`${day.minutes} Minuten`:'vollständige Regeneration'}</p>{day.postponed&&<em>Verschoben – Folgeplan automatisch angepasst</em>}</div>{v&&<button aria-label="Video starten" onClick={()=>onStart(day,v)}><Play/></button>}</article>})}</div></div> }
 
-function WorkoutSheet({ workout, onClose, onFinish }: {workout:Workout;onClose:()=>void;onFinish:(w:Workout)=>void}) { return <div className="sheet-backdrop"><div className="sheet workout-sheet"><div className="sheet-head"><button className="back" onClick={onClose}><ArrowLeft/></button><div><p className="eyebrow">{workout.focus}</p><h2>{workout.title}</h2></div></div><div className="workout-meta"><span>{workout.minutes} Min.</span><span>{workout.intensity}</span><span>RPE ≤ 6</span></div><div className="exercise-list">{workout.exercises.map((ex,i)=><article key={`${ex.name}-${i}`}><div className={`exercise-number ${ex.category}`}>{i+1}</div><div><small>{ex.dose}</small><h3>{ex.name}</h3><p>{ex.detail}</p></div></article>)}</div><button className="primary sticky-action" onClick={()=>onFinish(workout)}><Check/> Einheit abschließen</button></div></div> }
+function NutritionView({ currentDay, mealLogs, prepLogs, shoppingChecks, onMeal, onPrep, onShopping }:{ currentDay:number; mealLogs:MealLog[]; prepLogs:PrepLog[]; shoppingChecks:Record<string,boolean>; onMeal:(r:Recipe,d?:string)=>void; onPrep:(r:Recipe,d?:string,t?:string)=>void; onShopping:(v:Record<string,boolean>)=>void }) { const [day,setDay]=useState(currentDay), [windowSize,setWindowSize]=useState<ShoppingWindow>(3), [showShopping,setShowShopping]=useState(false); const nutrition=nutritionForCycleDay(day), date=TODAY(), items=aggregateShoppingList(Array.from({length:windowSize},(_,i)=>((currentDay-1+i)%8)+1),shoppingChecks); return <div className="page-stack"><div className="day-picker">{nutritionDays.map(d=><button key={d.day} className={day===d.day?'active':''} onClick={()=>setDay(d.day)}><span>{d.day}</span>{d.title}</button>)}</div><section className="nutrition-target"><div><p className="eyebrow">AKTUELLER ZIELBEREICH</p><h2>Tag {day} · {nutrition.title}</h2></div><div><b>{nutrition.kcalRange}</b><b>{nutrition.proteinRange}</b></div><p>Orientierungswerte, keine medizinisch exakten Vorgaben. Passe sie im Profil an deine Entwicklung an.</p></section>{nutrition.meals.map(recipe=><RecipeCard key={recipe.id} recipe={recipe} eaten={mealLogs.some(l=>l.date===date&&l.recipeId===recipe.id&&l.eaten)} prepared={prepLogs.some(l=>l.date===date&&l.recipeId===recipe.id&&l.done)} onEat={()=>onMeal(recipe)} onPrep={()=>onPrep(recipe)}/>) }<section className="card shopping"><SectionTitle eyebrow="EINKAUFSLISTE" title="Automatisch zusammengefasst"/><div className="segmented">{([1,3,8] as ShoppingWindow[]).map(n=><button key={n} className={windowSize===n?'active':''} onClick={()=>setWindowSize(n)}>{n===1?'Nächster Tag':n===3?'3 Tage':'8 Tage'}</button>)}</div><button className="secondary full" onClick={()=>setShowShopping(!showShopping)}><ShoppingBasket/>{showShopping?'Liste schließen':`${items.length} Zutaten anzeigen`}</button>{showShopping&&<ShoppingList items={items} onToggle={item=>onShopping({...shoppingChecks,[item.id]:!shoppingChecks[item.id]})}/>}</section></div> }
 
-function Onboarding({onDone}:{onDone:()=>void}) { const [step,setStep]=useState(0); const slides=[
-  {icon:<Activity/>,kicker:'DEIN NEUSTART',title:'Nicht zurück auf früher. Erst einmal vorwärts.',text:'Keeper Comeback bringt dich mit Einheiten bis 45 Minuten zurück zu Ausdauer, Kraft, Beweglichkeit und Torwart-Athletik.'},
-  {icon:<Sparkles/>,kicker:'JEDEN TAG PASSEND',title:'Der Plan hört auf deinen Körper.',text:'Energie, Schlaf, Muskelkater sowie Rücken- und Nackenschmerz bestimmen, ob du normal, reduziert oder regenerativ trainierst.'},
-  {icon:<ShieldCheck/>,kicker:'SICHER STARTEN',title:'Schmerz ist kein Motivationstest.',text:'Trainiere nie in stechenden oder zunehmenden Schmerz. Starke oder anhaltende Beschwerden gehören medizinisch abgeklärt – besonders bei Taubheit, Schwäche, Fieber oder Blasen-/Darmproblemen.'}
-]; const s=slides[step]; return <div className="onboarding"><div className="onboard-top"><div className="brand-mark">KC</div><div className="step-dots">{slides.map((_,i)=><i key={i} className={i===step?'active':''}/>)}</div></div><div className="onboard-visual">{s.icon}</div><div className="onboard-copy"><p className="eyebrow lime">{s.kicker}</p><h1>{s.title}</h1><p>{s.text}</p></div><button className="primary" onClick={()=>step<slides.length-1?setStep(step+1):onDone()}>{step<slides.length-1?'Weiter':'Mein Comeback starten'} <ChevronRight/></button></div> }
+function RecipeCard({recipe,eaten,prepared,onEat,onPrep}:{recipe:Recipe;eaten:boolean;prepared:boolean;onEat:()=>void;onPrep:()=>void}) { const [open,setOpen]=useState(false), [alt,setAlt]=useState(false); return <article className="recipe-card"><button className="recipe-summary" onClick={()=>setOpen(!open)}><div><p className="eyebrow">{recipe.meal}{recipe.mealPrep?' · MEAL PREP':''}</p><h3>{recipe.title}</h3><span>{recipe.kcal} kcal · {recipe.protein} g Protein · {recipe.minutes} Min.</span></div><ChevronDown className={open?'rotated':''}/></button>{open&&<div className="recipe-detail"><h4>Zutaten</h4><ul>{recipe.ingredients.map((i,index)=><li key={`${i.name}-${index}`}><span>{i.name}</span><b>{i.amount} {i.unit}</b></li>)}</ul><h4>Zubereitung</h4><ol>{recipe.steps.map(step=><li key={step}>{step}</li>)}</ol>{recipe.prepHint&&<p className="prep-hint"><Sparkles/> {recipe.prepHint}</p>}<p className="storage"><b>Aufbewahrung:</b> {recipe.storage}</p>{alt&&<div className="alternatives">{recipe.alternatives.map(a=><p key={a}>• {a}</p>)}</div>}<div className="button-grid"><button className={eaten?'secondary done':'secondary'} onClick={onEat}><Check/>{eaten?'Gegessen':'Als gegessen markieren'}</button>{recipe.mealPrep&&<button className={prepared?'secondary done':'secondary'} onClick={onPrep}><ListChecks/>{prepared?'Vorbereitet':'Für morgen vorbereiten'}</button>}<button className="secondary" onClick={()=>setAlt(!alt)}><RotateCcw/>Alternative anzeigen</button><button className="secondary" onClick={()=>document.querySelector('.shopping')?.scrollIntoView({behavior:'smooth'})}><Plus/>Zur Einkaufsliste</button></div></div>}</article> }
+function ShoppingList({items,onToggle}:{items:ShoppingItem[];onToggle:(i:ShoppingItem)=>void}) { const labels:Record<string,string>={produce:'🥦 Obst & Gemüse',carbs:'🌾 Kohlenhydrate',legumes:'🫘 Hülsenfrüchte',protein:'🌱 Proteinquellen',soy:'🥛 Sojaprodukte',nuts:'🥜 Nüsse & Samen',other:'🧂 Gewürze & Sonstiges'}; return <div className="shopping-list">{Object.entries(labels).map(([category,label])=>{const group=items.filter(i=>i.category===category);return group.length?<section key={category}><h4>{label}</h4>{group.map(item=><button key={item.id} className={item.checked?'checked':''} onClick={()=>onToggle(item)}><i><Check/></i><span>{item.name}</span><b>{item.amount} {item.unit}</b></button>)}</section>:null})}</div> }
+
+function ProgressView({feedback,exercises,mealLogs,supplements,profile,onExercise,onSupplement}:{feedback:WorkoutFeedback[];exercises:ExerciseProgress[];mealLogs:MealLog[];supplements:SupplementLog[];profile:Profile;onExercise:(e:ExerciseProgress,v:number)=>void;onSupplement:(k:'creatine'|'proteinShake')=>void}) { const hiit=feedback.filter(f=>f.cycleDay===1).sort((a,b)=>a.date.localeCompare(b.date)), latest=hiit.at(-1), supp=supplements.find(s=>s.date===TODAY()); return <div className="page-stack"><section className="progress-hero"><div><p className="eyebrow lime">DEIN COMEBACK</p><h2>{feedback.filter(f=>f.complete).length} Einheiten</h2><span>Fortschritt ohne Schuld- oder Strafmechanismen.</span></div><Flame/></section><section className="card"><SectionTitle eyebrow="HIIT-BENCHMARK" title={latest?formatDate(latest.date):'Noch kein Wert'} action={latest?`${latest.intensity}/10 RPE`:''}/>{latest&&<div className="metric-grid four"><article><b>{latest.complete?'Ja':'Teilweise'}</b><span>vollständig</span></article><article><b>{latest.earlyStops??'–'}</b><span>Intervalle früh</span></article><article><b>{latest.extraBreaks??'–'}</b><span>Extra-Pausen</span></article><article><b>{latest.technique??'–'}/10</b><span>Technik</span></article></div>}{hiit.length>1&&<p className="positive-note">Vergleich zum Start: {trendText(hiit[0],hiit.at(-1)!)}</p>}</section><section><SectionTitle eyebrow="SKILLS & PROGRESSION" title="Saubere Leistung tracken"/><div className="skill-list">{exercises.map(item=><SkillRow key={item.key} item={item} onSave={v=>onExercise(item,v)}/>)}</div></section><section className="card"><SectionTitle eyebrow="ERNÄHRUNG" title="Konstanz statt Bewertung"/><div className="metric-grid"><article><b>{mealLogs.filter(l=>l.eaten).length}</b><span>Mahlzeiten markiert</span></article><article><b>{profile.proteinTarget} g</b><span>aktuelles Proteinziel</span></article></div></section><section className="card supplements"><SectionTitle eyebrow="SUPPLEMENTS" title="Optional und nüchtern"/><ToggleRow checked={Boolean(supp?.creatine)} label="Creatine Monohydrate" detail="Standardziel 3–5 g täglich, auch an Rest Days" onClick={()=>onSupplement('creatine')}/><ToggleRow checked={Boolean(supp?.proteinShake)} label="Proteinshake" detail="Nur als Hilfsmittel, wenn normales Essen nicht reicht" onClick={()=>onSupplement('proteinShake')}/><p className="muted">Koffein ist optional und spät am Abend nicht empfohlen. Bei vollständig veganer Ernährung neutral auf Vitamin B12 und weitere potenziell relevante Nährstoffe achten. Keine Heilversprechen.</p></section></div> }
+function SkillRow({item,onSave}:{item:ExerciseProgress;onSave:(v:number)=>void}) { const [value,setValue]=useState(String(item.current)); return <article className="skill-row"><div><p>{item.advanced?'SPÄTER · ':''}{item.label}</p><strong>{item.current} {item.unit}</strong><small>Rekord {item.record} · Nächster Schritt: {item.nextStep}</small></div><div><input type="number" min="0" value={value} onChange={e=>setValue(e.target.value)}/><button onClick={()=>onSave(Number(value)||0)}>Speichern</button></div></article> }
+
+function ProfileView({session,profile,onSave,onToast}:{session:Session|null;profile:Profile;onSave:(p:Profile)=>void;onToast:(s:string)=>void}) { const [draft,setDraft]=useState(profile), [email,setEmail]=useState(''), [sending,setSending]=useState(false); async function login(){if(!supabase||!email)return;setSending(true);const{error}=await supabase.auth.signInWithOtp({email,options:{emailRedirectTo:window.location.href.split('#')[0]}});setSending(false);onToast(error?error.message:'Login-Link wurde gesendet')} return <div className="page-stack"><section className="profile-card"><div className="profile-icon"><CircleUserRound/></div><h2>{session?.user.email??'Offline-Profil'}</h2><p>{session?'RLS-geschützt synchronisiert. Offline-Daten bleiben weiterhin nutzbar.':'Daten bleiben auf diesem Gerät; Login aktiviert sicheren Supabase-Sync.'}</p></section>{!session&&<section className="login-card"><p className="eyebrow">SYNC AKTIVIEREN</p><h3>Mit E-Mail anmelden</h3><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="deine@email.de"/><button className="primary" disabled={!isSupabaseConfigured||sending} onClick={login}><LogIn/>{sending?'Wird gesendet…':'Login-Link senden'}</button></section>}<section className="card form-card"><SectionTitle eyebrow="AUSGANGSWERTE" title="Editierbare Orientierung"/><label>Alter<input type="number" value={draft.age} onChange={e=>setDraft({...draft,age:Number(e.target.value)})}/></label><label>Größe (cm)<input type="number" value={draft.heightCm} onChange={e=>setDraft({...draft,heightCm:Number(e.target.value)})}/></label><label>Gewicht (kg)<input type="number" step="0.1" value={draft.weightKg} onChange={e=>setDraft({...draft,weightKg:Number(e.target.value)})}/></label><label>Protein-Ziel (g)<input type="number" value={draft.proteinTarget} onChange={e=>setDraft({...draft,proteinTarget:Number(e.target.value)})}/></label></section><section className="card"><SectionTitle eyebrow="EQUIPMENT" title="Beeinflusst deine Videoauswahl"/>{([['pullupBar','Klimmzugstange'],['bands','Resistance Bands'],['dipBars','Dip Bars'],['mat','Matte'],['none','Keine Ausrüstung']] as const).map(([key,label])=><ToggleRow key={key} checked={draft.equipment[key]} label={label} detail={key==='pullupBar'?'Aktiviert das Upper-Body-Video mit Pull-up Bar':''} onClick={()=>setDraft({...draft,equipment:{...draft.equipment,[key]:!draft.equipment[key]}})}/>)}</section><section className="card"><ToggleRow checked={draft.plantBased} label="Pflanzenbasiert priorisieren" detail="Standard für Rezepte und Einkaufsliste" onClick={()=>setDraft({...draft,plantBased:!draft.plantBased})}/><ToggleRow checked={draft.vegan} label="Vollständig vegan" detail="Aktiviert den neutralen B12-Hinweis" onClick={()=>setDraft({...draft,vegan:!draft.vegan})}/></section><button className="primary" onClick={()=>onSave(draft)}>Profil speichern</button><p className="legal-note">Kein Medizinprodukt. Starke oder zunehmende Schmerzen, Taubheit, Schwäche, Fieber oder Blasen-/Darmprobleme medizinisch abklären.</p></div> }
+
+function VideoCard({video,featured,compact,onStart}:{video:WorkoutVideo;featured?:boolean;compact?:boolean;onStart:()=>void}) { return <article className={`video-card ${featured?'featured':''} ${compact?'compact':''}`}><div className="thumbnail" style={{backgroundImage:`url(https://i.ytimg.com/vi/${video.id}/hqdefault.jpg)`}}><button onClick={onStart} aria-label="Workout starten"><Play fill="currentColor"/></button><span>{video.minutes} Min.</span></div><div className="video-copy"><p className="eyebrow">{video.channel}</p><h3>{video.title}</h3><div className="chips"><span>{video.intensity}</span><span>{video.equipment}</span></div><p>{video.goals.join(' · ')}</p><button className="secondary" onClick={onStart}><Play/>Workout starten</button></div></article> }
+function VideoSheet({day,video,onClose,onDone}:{day:ScheduledDay;video:WorkoutVideo;onClose:()=>void;onDone:()=>void}) { return <div className="sheet-backdrop"><div className="sheet video-sheet"><div className="sheet-head"><div><p className="eyebrow">TAG {day.day} VON 8</p><h2>{video.title}</h2></div><button onClick={onClose}><X/></button></div><div className="video-frame"><iframe src={`https://www.youtube-nocookie.com/embed/${video.id}?rel=0`} title={video.title} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen/></div><a className="external" href={`https://www.youtube.com/watch?v=${video.id}`} target="_blank" rel="noreferrer"><ExternalLink/>Falls Einbettung nicht möglich ist: auf YouTube öffnen</a><div className="workout-info"><b>Zielintensität {day.intensity}</b><p>{video.goals.join(' · ')}</p>{day.recoveryNote&&<p>{day.recoveryNote}</p>}</div><button className="primary sticky-action" onClick={onDone}><Check/>Workout abgeschlossen</button></div></div> }
+function CheckinSheet({initial,onClose,onSave}:{initial?:Checkin;onClose:()=>void;onSave:(c:Checkin)=>void}) { const [v,setV]=useState<Checkin>(initial??{energy:3,sleep:3,soreness:2,fatigue:2,pain:0,backPain:2,neckPain:2,motivation:5}); return <div className="sheet-backdrop"><div className="sheet"><div className="sheet-head"><div><p className="eyebrow">DAILY CHECK-IN</p><h2>Wie ist dein Körper heute?</h2></div><button onClick={onClose}><X/></button></div><Slider label="Schlafqualität" value={v.sleep} max={5} onChange={n=>setV({...v,sleep:n})}/><Slider label="Energie" value={v.energy} max={5} onChange={n=>setV({...v,energy:n})}/><Slider label="Muskelkater" value={v.soreness} max={10} onChange={n=>setV({...v,soreness:n})}/><Slider label="Allgemeine Erschöpfung" value={v.fatigue} max={10} onChange={n=>setV({...v,fatigue:n})}/><Slider label="Beschwerden allgemein" value={v.pain} max={10} onChange={n=>setV({...v,pain:n})}/><Slider label="Rücken" value={v.backPain} max={10} onChange={n=>setV({...v,backPain:n})}/><Slider label="Nacken" value={v.neckPain} max={10} onChange={n=>setV({...v,neckPain:n})}/><Slider label="Motivation" value={v.motivation} max={10} onChange={n=>setV({...v,motivation:n})}/><button className="primary" onClick={()=>onSave(v)}>Empfehlung aktualisieren</button></div></div> }
+function FeedbackSheet({day,initial,onClose,onSave}:{day:ScheduledDay;initial?:WorkoutFeedback;onClose:()=>void;onSave:(f:WorkoutFeedback)=>void}) { const [v,setV]=useState<WorkoutFeedback>(initial??{date:day.date,cycleDay:day.day,workoutKey:`cycle-${day.day}-${day.kind}`,complete:true,minutes:day.minutes,intensity:day.kind==='rest'?1:5,earlyStops:0,extraBreaks:0,technique:7}); const set=(key:keyof WorkoutFeedback,value:number|boolean|string)=>setV({...v,[key]:value}); return <div className="sheet-backdrop"><div className="sheet"><div className="sheet-head"><div><p className="eyebrow">WORKOUT-FEEDBACK</p><h2>{day.shortTitle}</h2></div><button onClick={onClose}><X/></button></div><ToggleRow checked={v.complete} label="Workout vollständig geschafft?" detail="Ehrlich dokumentieren – kein Urteil" onClick={()=>set('complete',!v.complete)}/>{day.kind==='hiit'&&<><NumberField label="Übungen vorzeitig beendet" value={v.earlyStops??0} onChange={n=>set('earlyStops',n)}/><NumberField label="Zusätzliche Pausen" value={v.extraBreaks??0} onChange={n=>set('extraBreaks',n)}/><Slider label="Beine ermüdet" value={v.legsFatigue??5} max={10} onChange={n=>set('legsFatigue',n)}/><Slider label="Oberkörper ermüdet" value={v.upperFatigue??5} max={10} onChange={n=>set('upperFatigue',n)}/><Slider label="Kondition" value={v.conditioning??5} max={10} onChange={n=>set('conditioning',n)}/></>}{day.kind==='legs'&&<><Slider label="Beinbelastung" value={v.legsFatigue??5} max={10} onChange={n=>set('legsFatigue',n)}/><Slider label="Kniegefühl" value={v.kneeFeeling??5} max={10} onChange={n=>set('kneeFeeling',n)}/></>}{['recovery','light'].includes(day.kind)&&<><Slider label="Steifheit vorher" value={v.stiffnessBefore??5} max={10} onChange={n=>set('stiffnessBefore',n)}/><Slider label="Steifheit nachher" value={v.stiffnessAfter??3} max={10} onChange={n=>set('stiffnessAfter',n)}/></>}<Slider label="Gesamtintensität" value={v.intensity} max={10} onChange={n=>set('intensity',n)}/>{!['rest','recovery'].includes(day.kind)&&<Slider label="Technik" value={v.technique??7} max={10} onChange={n=>set('technique',n)}/>}<label className="notes">Notiz<textarea value={v.notes??''} onChange={e=>set('notes',e.target.value)} placeholder="Was soll beim nächsten Mal besser laufen?"/></label><button className="primary" onClick={()=>onSave(v)}>Feedback speichern</button></div></div> }
+
+function Onboarding({onDone}:{onDone:()=>void}) { const [step,setStep]=useState(0); const slides=[{icon:<Activity/>,k:'DEIN COMEBACK',t:'Ein klarer Plan für jeden Tag.',x:'Acht Tage mit Calisthenics, HIIT, Mobility, Regeneration und ausreichend Rest – ohne starre Kalenderwoche.'},{icon:<Utensils/>,k:'PFLANZENBASIERT',t:'Training und Essen greifen ineinander.',x:'Proteinreiche Tagespläne, vorbereitbare Frühstücke, Meal Prep und eine automatische Einkaufsliste.'},{icon:<Sparkles/>,k:'ADAPTIV, NICHT WILLKÜRLICH',t:'Deine Tagesform bleibt sichtbar.',x:'Grün trainiert normal, Gelb reduziert, Rot empfiehlt Recovery oder Verschieben. Keine Einheit geht verloren.'}]; const s=slides[step]; return <div className="onboarding"><div className="onboard-top"><div className="brand-mark">KC</div><div className="step-dots">{slides.map((_,i)=><i key={i} className={i===step?'active':''}/>)}</div></div><div className="onboard-visual">{s.icon}</div><div className="onboard-copy"><p className="eyebrow lime">{s.k}</p><h1>{s.t}</h1><p>{s.x}</p></div><button className="primary" onClick={()=>step<slides.length-1?setStep(step+1):onDone()}>{step<slides.length-1?'Weiter':'Comeback öffnen'}<ChevronRight/></button></div> }
+function Nav({active,icon,label,onClick}:{active:boolean;icon:React.ReactNode;label:string;onClick:()=>void}) { return <button className={active?'active':''} onClick={onClick}>{icon}<span>{label}</span></button> }
+function SectionTitle({eyebrow,title,action}:{eyebrow:string;title:string;action?:string}) { return <div className="section-head"><div><p className="eyebrow">{eyebrow}</p><h3>{title}</h3></div>{action&&<span>{action}</span>}</div> }
+function Slider({label,value,max,onChange}:{label:string;value:number;max:number;onChange:(n:number)=>void}) { return <label className="slider"><div><span>{label}</span><b>{value}/{max}</b></div><input type="range" min="0" max={max} value={value} onChange={e=>onChange(Number(e.target.value))}/></label> }
+function NumberField({label,value,onChange}:{label:string;value:number;onChange:(n:number)=>void}) { return <label className="number-field"><span>{label}</span><input type="number" min="0" value={value} onChange={e=>onChange(Number(e.target.value))}/></label> }
+function ToggleRow({checked,label,detail,onClick}:{checked:boolean;label:string;detail:string;onClick:()=>void}) { return <button className="toggle-row" onClick={onClick}><i className={checked?'on':''}><span/></i><div><b>{label}</b>{detail&&<small>{detail}</small>}</div></button> }
+function mergeBy<T>(base:T[],incoming:T[],key:(item:T)=>string) { const map=new Map(base.map(item=>[key(item),item])); incoming.forEach(item=>map.set(key(item),item)); return Array.from(map.values()) }
+function feedbackRow(uid:string,v:WorkoutFeedback) { return { user_id:uid, feedback_date:v.date, cycle_day:v.cycleDay, completed:v.complete, early_stops:v.earlyStops, extra_breaks:v.extraBreaks, intensity:v.intensity, legs_fatigue:v.legsFatigue, upper_fatigue:v.upperFatigue, conditioning:v.conditioning, technique:v.technique, knee_feeling:v.kneeFeeling, stiffness_before:v.stiffnessBefore, stiffness_after:v.stiffnessAfter, notes:v.notes??'' } }
+function formatDate(iso:string) { return new Intl.DateTimeFormat('de-DE',{weekday:'short',day:'2-digit',month:'2-digit'}).format(new Date(`${iso}T12:00:00`)) }
+function relativeDate(iso:string,today:string) { const diff=Math.round((new Date(`${iso}T12:00:00`).getTime()-new Date(`${today}T12:00:00`).getTime())/86400000); return diff===0?'Heute':diff===1?'Morgen':formatDate(iso) }
+function trendText(first:WorkoutFeedback,last:WorkoutFeedback) { if ((last.earlyStops??0)<(first.earlyStops??0)) return 'weniger vorzeitig beendete Intervalle'; if ((last.technique??0)>(first.technique??0)) return 'Technik verbessert'; return 'eine weitere belastbare Vergleichsmessung gespeichert' }

@@ -2,17 +2,17 @@
 
 **Live-App:** https://lottmarkomme.github.io/keeper-comeback/
 
-Eine installierbare, mobile Fitness-PWA für einen sicheren Wiedereinstieg mit täglicher Anpassung, Torwart-Fokus, Grundlagenausdauer, Kraft und Mobilität. Die ersten Wochen bleiben bewusst bei maximal 45 Minuten.
+Eine installierbare, mobile Fitness-PWA für ein persönliches Fitness-Comeback mit Calisthenics, HIIT, Mobility, Regeneration und pflanzenbasierter Ernährung.
 
 ## Was die App kann
 
-- sieben unterschiedliche Einheiten pro Woche
-- Tages-Check für Energie, Schlaf, Muskelkater, Rücken und Nacken
-- automatische Reduktion bei schlechter Erholung oder höheren Beschwerden
-- aktive Erholung statt Training bei Schmerzangaben ab 7/10
-- Torwart-Fußarbeit, Reaktion, Landetechnik und Athletik
+- fortlaufender, verschiebbarer 8-Tage-Zyklus statt starrer Kalenderwoche
+- feste Workout-Videos für jeden Trainingstag und Equipment-Alternative
+- Tages-Check mit transparenter grüner, gelber oder roter Empfehlung
+- vollständiger 8-Tage-Ernährungsplan mit vorbereitbaren Frühstücken
+- Meal Prep, automatische Einkaufsliste, Supplements und Skills-Progression
 - lokaler Offline-Modus plus optionale Supabase-Synchronisierung
-- Fortschritt, Trainingsminuten und Wochenübersicht
+- HIIT-, Calisthenics-, Mobility- und Ernährungsfortschritt
 - installierbare PWA mit iPhone-App-Icon
 
 ## Lokal starten
@@ -47,6 +47,6 @@ Für Magic-Link-Anmeldung muss die veröffentlichte URL zusätzlich in Supabase 
 
 ## Trainingslogik
 
-Der Plan steigert Cardio nur nach ausreichender Konstanz und nie über das anfängliche 45-Minuten-Limit. Der Tages-Check kann Umfang und Intensität reduzieren. Ein hoher Schmerzwert schaltet auf aktive Erholung. Das ist eine vorsichtige Software-Regel und keine Diagnose.
+Der erste Zyklus beginnt am 15.09.2026 mit dem absolvierten HIIT-Benchmark. Nach Tag 8 startet Tag 1 automatisch erneut. Wird eine Einheit verschoben, rückt die Reihenfolge mit, sodass keine Einheit verloren geht und Recovery/Rest erhalten bleiben. Der Tages-Check reduziert bei Bedarf Varianten und Intensität oder empfiehlt transparent Regeneration. Das ist eine vorsichtige Software-Regel und keine Diagnose.
 
 Bei neuem starken Schmerz, Taubheit oder Schwäche, Blasen- oder Darmproblemen, Fieber oder Beschwerden nach einem Unfall soll nicht trainiert, sondern medizinische Hilfe eingeholt werden. Siehe [Mayo Clinic: Back pain – when to seek care](https://www.mayoclinic.org/diseases-conditions/back-pain/symptoms-causes/syc-20369906).

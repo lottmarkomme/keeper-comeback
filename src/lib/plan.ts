@@ -1,116 +1,108 @@
-import type { Checkin, Exercise, Workout } from '../types'
+import type { Checkin, CycleTemplate, EquipmentKey, ScheduledDay, TrafficLight, WorkoutFeedback } from '../types'
 
-const warmup: Exercise[] = [
-  { name: 'Ruhige Nasenatmung', detail: 'Aufrecht stehen, Schultern locker. Vier Sekunden ein, sechs Sekunden aus.', dose: '2 Min.', category: 'warmup' },
-  { name: 'Cat–Cow', detail: 'Im Vierfüßler die Wirbelsäule langsam runden und wieder lang werden lassen. Nie in Schmerz drücken.', dose: '8 Wiederholungen', category: 'mobility' },
-  { name: 'World’s Greatest Stretch – sanft', detail: 'Großer Ausfallschritt, hinteres Knie bei Bedarf am Boden. Brustkorb nur so weit öffnen, wie es angenehm bleibt.', dose: '4 je Seite', category: 'mobility' }
-]
+export const CYCLE_ANCHOR = '2026-09-15'
 
-const sessions: Omit<Workout, 'day'>[] = [
+export const cycleTemplates: CycleTemplate[] = [
   {
-    key: 'base-strength', title: 'Stabile Basis', subtitle: 'Ganzkörperkraft ohne Vollgas', minutes: 38, intensity: 'Moderat', focus: 'Kraft & Rückenfreundlichkeit',
-    exercises: [...warmup,
-      { name: 'Box Squat', detail: 'Kontrolliert auf einen Stuhl setzen, Füße fest in den Boden, wieder aufstehen. Rücken neutral.', dose: '3 × 8', category: 'strength' },
-      { name: 'Erhöhte Liegestütze', detail: 'Hände auf Tisch oder Bank. Körper bleibt als Linie; Höhe so wählen, dass 2–3 Wiederholungen übrig wären.', dose: '3 × 6–10', category: 'strength' },
-      { name: 'Bandrudern', detail: 'Band sicher befestigen. Ellenbogen nach hinten führen, Schulterblätter sanft zusammenziehen, Rippen unten lassen.', dose: '3 × 10', category: 'strength' },
-      { name: 'Dead Bug', detail: 'Rückenlage, unteren Rücken sanft am Boden halten. Gegengleich Arm und Bein langsam strecken.', dose: '3 × 5 je Seite', category: 'strength' },
-      { name: 'Child’s Pose mit Seitgriff', detail: 'Gesäß Richtung Fersen, Hände etwas nach rechts und links wandern. Nur angenehme Dehnung.', dose: '45 Sek. je Seite', category: 'mobility' }
-    ]
+    day: 1, kind: 'hiit', emoji: '🔥', title: '50 Min Full Body HIIT', shortTitle: 'HIIT Full Body', minutes: 50, intensity: '8–9/10',
+    video: { id: '1s_0rUUo0A0', title: '50 Min Full Body HIIT', channel: 'YouTube Workout', minutes: 50, intensity: 'Fortgeschritten', equipment: 'Keine Ausrüstung', goals: ['Ausdauer', 'Ganzkörperbelastung', 'Kraftausdauer', 'Kondition'] }
   },
   {
-    key: 'run-walk', title: 'Locker wieder laufen', subtitle: 'Laufen und Gehen im Wechsel', minutes: 35, intensity: 'Leicht', focus: 'Grundlagenausdauer',
-    exercises: [
-      { name: 'Zügiges Gehen', detail: 'Tempo langsam steigern, Arme locker mitschwingen.', dose: '6 Min.', category: 'warmup' },
-      { name: 'Run–Walk', detail: 'Sehr locker laufen: Du solltest in ganzen Sätzen sprechen können. Bei Beschwerden sofort ins Gehen wechseln.', dose: '8 × (1 Min. Lauf + 2 Min. Gehen)', category: 'cardio' },
-      { name: 'Ausgehen', detail: 'Tempo stufenweise senken und ruhig atmen.', dose: '5 Min.', category: 'recovery' }
-    ]
+    day: 2, kind: 'recovery', emoji: '🧘', title: 'Recovery + Full Body Mobility', shortTitle: 'Recovery + Mobility', minutes: 20, intensity: '2–3/10',
+    video: { id: 'lPKRiU9u_Hc', title: '20 Minute Full Body Flexibility Routine', channel: 'Tom Merrick', minutes: 20, intensity: 'Leicht', equipment: 'Matte optional', goals: ['Wirbelsäule', 'Hüfte', 'Hamstrings', 'Schultern', 'Brustwirbelsäule'] },
+    recoveryNote: 'Optional 30–60 Minuten entspannt spazieren. Du sollst dich danach besser fühlen als vorher.'
   },
   {
-    key: 'keeper-footwork', title: 'Keeper-Fundament', subtitle: 'Fußarbeit, Reaktion und sichere Landung', minutes: 36, intensity: 'Moderat', focus: 'Torwart & Athletik',
-    exercises: [...warmup.slice(0, 2),
-      { name: 'Set-Position Holds', detail: 'Füße etwas breiter als hüftbreit, Gewicht auf dem Vorfuß, Hände bereit. Ruhig und stabil bleiben.', dose: '5 × 20 Sek.', category: 'keeper' },
-      { name: 'Lateral Shuffle + Set', detail: 'Drei kleine Schritte seitlich, sauber abbremsen und in Torwart-Grundstellung landen.', dose: '4 × 4 je Seite', category: 'keeper' },
-      { name: 'Tennisball-Reaktion', detail: 'Ball gegen eine Wand werfen und nach einmaligem Aufprall fangen. Abstand klein halten.', dose: '4 × 45 Sek.', category: 'keeper' },
-      { name: 'Knieende Seitlandung', detail: 'Aus Kniestand weich auf Unterarm, Hüfte und Seite abrollen. Erst Technik, keine Weite.', dose: '3 × 4 je Seite', category: 'keeper' },
-      { name: 'Einbeinstand', detail: 'Knie leicht gebeugt, Becken gerade. Schwieriger: Ball langsam um den Körper führen.', dose: '3 × 30 Sek. je Seite', category: 'strength' }
-    ]
+    day: 3, kind: 'upper', emoji: '💪', title: 'Calisthenics Upper Body', shortTitle: 'Upper Body', minutes: 30, intensity: '7–8/10',
+    video: { id: 'wUtrI5bnrUc', title: '30 Min Upper Body Calisthenics / Bodyweight', channel: 'YouTube Workout', minutes: 30, intensity: 'Mittel', equipment: 'Keine Ausrüstung', goals: ['Brust', 'Schultern', 'Trizeps', 'oberer Rücken', 'Core'] },
+    alternativeVideo: { id: '61mlOpBEnGc', title: '20 Min Upper Body Calisthenics with Pull Up Bar', channel: 'Tom Peto Training', minutes: 20, intensity: 'Mittel', equipment: 'Klimmzugstange', goals: ['Pull-ups', 'Push', 'Rücken', 'Core'] }
   },
   {
-    key: 'mobility-reset', title: 'Mobility Reset', subtitle: 'Bewegen, atmen, Spannung lösen', minutes: 24, intensity: 'Leicht', focus: 'Yoga & Beweglichkeit',
-    exercises: [
-      { name: '90/90 Atmung', detail: 'Rückenlage, Unterschenkel auf einen Stuhl. Lang ausatmen und Rippen sinken lassen.', dose: '3 Min.', category: 'recovery' },
-      { name: 'Beckenkippen', detail: 'In Rückenlage das Becken klein vor- und zurückrollen. Der Bewegungsweg bleibt schmerzfrei.', dose: '10 langsam', category: 'mobility' },
-      { name: 'Open Book', detail: 'Seitlage, Knie übereinander. Oberen Arm und Brustkorb langsam öffnen; Knie bleiben zusammen.', dose: '6 je Seite', category: 'mobility' },
-      { name: '90/90 Hüftwechsel', detail: 'Im Sitz beide Knie kontrolliert von einer Seite zur anderen bewegen. Hände dürfen stützen.', dose: '8 gesamt', category: 'mobility' },
-      { name: 'Halbkniender Hüftbeuger', detail: 'Becken leicht einrollen und nach vorn verlagern, ohne ins Hohlkreuz zu gehen.', dose: '45 Sek. je Seite', category: 'mobility' },
-      { name: 'Sphinx', detail: 'Bauchlage auf Unterarmen. Brustbein lang nach vorne ziehen. Weglassen, wenn es den Rücken reizt.', dose: '5 × 15 Sek.', category: 'mobility' },
-      { name: 'Body Scan', detail: 'Ruhig liegen, Kiefer und Schultern lösen, Atem beobachten.', dose: '3 Min.', category: 'recovery' }
-    ]
+    day: 4, kind: 'legs', emoji: '🦵', title: 'Calisthenics Legs + Core', shortTitle: 'Legs + Core', minutes: 30, intensity: '7–8/10',
+    video: { id: 'ywVaPs9WbgM', title: 'Calisthenics Leg Workout – Follow Along', channel: 'THENX', minutes: 30, intensity: 'Mittel–hoch', equipment: 'Keine Ausrüstung', goals: ['Quadrizeps', 'Hamstrings', 'Gesäß', 'Waden', 'Stabilität', 'Explosivität'] }
   },
   {
-    key: 'athletic-strength', title: 'Keeper-Kraft', subtitle: 'Beine, Rumpf und Schultergürtel', minutes: 42, intensity: 'Moderat', focus: 'Kraft & Explosiv-Basis',
-    exercises: [...warmup,
-      { name: 'Reverse Lunge mit Halt', detail: 'Einen Schritt zurück, vorderes Knie stabil. Beim Hochkommen zwei Sekunden einbeinig halten.', dose: '3 × 6 je Seite', category: 'strength' },
-      { name: 'Glute Bridge', detail: 'Fersen in den Boden, Gesäß anspannen, Becken heben ohne den Rücken zu überstrecken.', dose: '3 × 10', category: 'strength' },
-      { name: 'Bird Dog', detail: 'Im Vierfüßler Arm und Gegenbein lang machen, Becken ruhig halten.', dose: '3 × 6 je Seite', category: 'strength' },
-      { name: 'Pallof Press mit Band', detail: 'Seitlich zum sicher befestigten Band stehen. Hände vor die Brust drücken, Rotation verhindern.', dose: '3 × 8 je Seite', category: 'strength' },
-      { name: 'Wadenheben', detail: 'Langsam hochdrücken, oben kurz halten, kontrolliert absenken.', dose: '3 × 12', category: 'strength' }
-    ]
+    day: 5, kind: 'recovery', emoji: '🌿', title: 'Recovery / Mobility', shortTitle: 'Recovery', minutes: 20, intensity: '1–3/10',
+    video: { id: '2wYQhJdv2oI', title: '20 Minute Full Body Flexibility Routine V3', channel: 'Tom Merrick', minutes: 20, intensity: 'Sehr leicht', equipment: 'Matte optional', goals: ['Beweglichkeit', 'Spannung lösen', 'aktive Erholung'] },
+    recoveryNote: 'Alternativ sind 30–60 Minuten Spazierengehen, sehr leichte Mobility oder eine vollständige Pause richtig.'
   },
   {
-    key: 'easy-cardio', title: 'Ausdauer ohne Druck', subtitle: 'Bewegen und frisch aufhören', minutes: 35, intensity: 'Leicht', focus: 'Ausdauer & Erholung',
-    exercises: [
-      { name: 'Lockeres Cardio', detail: 'Spazieren, Radfahren oder Crosstrainer. Intensität: Du kannst dich entspannt unterhalten.', dose: '30 Min.', category: 'cardio' },
-      { name: 'Waden- und Hüftmobilität', detail: 'Ruhig durchbewegen, nicht federn und nie in stechenden Schmerz gehen.', dose: '5 Min.', category: 'mobility' }
-    ]
+    day: 6, kind: 'fullbody', emoji: '🤸', title: 'Calisthenics Full Body', shortTitle: 'Full Body', minutes: 30, intensity: '7–8/10',
+    video: { id: 'fWptOzJI3Wc', title: '30 Min Full Body Calisthenics Workout at Home', channel: 'Tom Peto Training', minutes: 30, intensity: 'Mittel–hoch', equipment: 'Keine Ausrüstung', goals: ['Push', 'Legs', 'Rücken/Posture', 'Core', 'Schulterkraft'] }
   },
   {
-    key: 'full-rest', title: 'Aktive Pause', subtitle: 'Heute zählt Erholung', minutes: 15, intensity: 'Leicht', focus: 'Regeneration',
-    exercises: [
-      { name: 'Erholungsspaziergang', detail: 'Ganz entspannt gehen. Kein Leistungsziel und kein schlechtes Gewissen.', dose: '10 Min.', category: 'recovery' },
-      { name: 'Ruhige Mobilität', detail: 'Schultern kreisen, Cat–Cow und Hüftkreise in angenehmer Größe.', dose: '5 Min.', category: 'mobility' }
-    ]
+    day: 7, kind: 'rest', emoji: '😴', title: 'Vollständiger Rest Day', shortTitle: 'Rest Day', minutes: 0, intensity: '0–1/10',
+    recoveryNote: 'Heute ist Regeneration Training. Kein schlechtes Gewissen, kein HIIT und kein Leistungsziel. Schlaf, Ernährung und Flüssigkeit sind heute dein Training.'
+  },
+  {
+    day: 8, kind: 'light', emoji: '🚶', title: 'Mobility + leichtes Cardio', shortTitle: 'Mobility + Cardio', minutes: 20, intensity: '2–4/10',
+    video: { id: 'DkTCcOY1o5M', title: '20 Min Low Impact Cardio – No Jumping', channel: 'YouTube Workout', minutes: 20, intensity: 'Leicht', equipment: 'Keine Ausrüstung', goals: ['lockere Kondition', 'Durchblutung', 'Vorbereitung auf HIIT'] },
+    alternativeVideo: { id: '2wYQhJdv2oI', title: '20 Minute Full Body Flexibility Routine V3', channel: 'Tom Merrick', minutes: 20, intensity: 'Sehr leicht', equipment: 'Matte optional', goals: ['Mobility', 'Regeneration'] }
   }
 ]
 
-const days = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
-
-export function makeWeek(weekIndex = 0, completionRate = 0): Workout[] {
-  const increase = weekIndex > 0 && completionRate >= 0.7 ? Math.min(weekIndex * 2, 8) : 0
-  return sessions.map((session, index) => ({
-    ...session,
-    day: days[index],
-    minutes: Math.min(45, session.minutes + (session.key === 'run-walk' || session.key === 'easy-cardio' ? increase : 0))
-  }))
+export const anchorBenchmark: WorkoutFeedback = {
+  date: CYCLE_ANCHOR, cycleDay: 1, workoutKey: 'cycle-1-hiit', complete: true, minutes: 50, intensity: 9,
+  notes: 'Vollständig beendet; gegen Ende einzelne Übungen vor Ablauf des Intervalls beendet.', benchmark: true
 }
 
-export function adaptWorkout(workout: Workout, checkin?: Checkin): { workout: Workout; note: string } {
-  if (!checkin) return { workout, note: 'Mach zuerst deinen kurzen Tages-Check – dann passe ich die Einheit an.' }
-  const pain = Math.max(checkin.backPain, checkin.neckPain)
-  if (pain >= 7) {
-    const recovery = makeWeek().find(item => item.key === 'full-rest')!
+export function parseLocalDate(iso: string) {
+  const [year, month, day] = iso.split('-').map(Number)
+  return new Date(year, month - 1, day, 12)
+}
+
+export function localIso(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+export function addDays(iso: string, amount: number) {
+  const date = parseLocalDate(iso)
+  date.setDate(date.getDate() + amount)
+  return localIso(date)
+}
+
+export function daysBetween(fromIso: string, toIso: string) {
+  return Math.round((parseLocalDate(toIso).getTime() - parseLocalDate(fromIso).getTime()) / 86400000)
+}
+
+export function cyclePositionForDate(dateIso: string, postponedDates: string[] = []) {
+  const elapsed = daysBetween(CYCLE_ANCHOR, dateIso)
+  if (elapsed < 0) return { cycleDay: 1, cycleNumber: 0, postponed: false }
+  const delays = postponedDates.filter(item => item <= dateIso).length
+  const adjusted = Math.max(0, elapsed - delays)
+  return { cycleDay: (adjusted % 8) + 1, cycleNumber: Math.floor(adjusted / 8) + 1, postponed: postponedDates.includes(dateIso) }
+}
+
+export function buildSchedule(fromIso: string, amount: number, postponedDates: string[] = [], feedback: WorkoutFeedback[] = []): ScheduledDay[] {
+  return Array.from({ length: amount }, (_, offset) => {
+    const date = addDays(fromIso, offset)
+    const position = cyclePositionForDate(date, postponedDates)
+    const template = cycleTemplates[position.cycleDay - 1]
+    return { ...template, date, postponed: position.postponed, completed: feedback.some(item => item.date === date && item.complete), isToday: date === localIso() }
+  })
+}
+
+export function getVideoForEquipment(template: CycleTemplate, equipment: Record<EquipmentKey, boolean>) {
+  if (template.day === 3 && equipment.pullupBar && template.alternativeVideo) return template.alternativeVideo
+  return template.video
+}
+
+export function evaluateReadiness(checkin: Checkin, template: CycleTemplate): { level: TrafficLight; title: string; explanation: string } {
+  const maxPain = Math.max(checkin.pain, checkin.backPain, checkin.neckPain)
+  if (maxPain >= 7 || checkin.energy <= 1 || checkin.sleep <= 1 || checkin.fatigue >= 8) {
     return {
-      workout: { ...recovery, key: `${workout.key}-recovery`, day: workout.day },
-      note: 'Heute keine Belastungseinheit: Deine Schmerzangabe ist hoch. Nur sanfte, schmerzfreie Bewegung – und bitte medizinisch abklären, wenn das neu, stark oder anhaltend ist.'
+      level: 'red', title: 'Heute Regeneration priorisieren',
+      explanation: template.kind === 'legs' && checkin.soreness >= 7
+        ? 'Deine Beine sind noch stark ermüdet. Verschiebe den Leg Day, damit die Reihenfolge erhalten bleibt und du sauber trainieren kannst.'
+        : 'Deine Angaben sprechen heute gegen eine harte Einheit. Verschieben ist kein verlorenes Training – der ganze Zyklus rückt sinnvoll weiter.'
     }
   }
-  if (pain >= 4 || checkin.energy <= 2 || checkin.sleep <= 2 || checkin.soreness >= 7) {
-    return {
-      workout: { ...workout, minutes: Math.max(15, Math.round(workout.minutes * 0.65)), intensity: 'Leicht', exercises: workout.exercises.map(ex => ({ ...ex, dose: ex.dose.replace(/^3 ×/, '2 ×').replace(/^4 ×/, '3 ×') })) },
-      note: 'Heute ist eine reduzierte Version sinnvoll: ungefähr zwei Drittel des Umfangs, sauber und ohne Leistungsdruck.'
-    }
+  if (maxPain >= 4 || checkin.energy <= 2 || checkin.sleep <= 2 || checkin.soreness >= 7 || checkin.fatigue >= 6 || checkin.motivation <= 2) {
+    return { level: 'yellow', title: 'Training reduziert durchführen', explanation: 'Nutze leichtere Varianten, längere Pausen und ungefähr 70 % des normalen Umfangs. Technik bleibt wichtiger als Tempo.' }
   }
-  return { workout, note: 'Die Werte sehen passend aus. Bleib trotzdem bei ungefähr 6 von 10 Anstrengung und hör frisch auf.' }
+  return { level: 'green', title: 'Bereit für die geplante Einheit', explanation: 'Deine Angaben passen zum heutigen Training. Halte dich an die Zielintensität und beende Sätze, bevor die Technik zerfällt.' }
 }
 
-export function getWeekStart(date = new Date()) {
-  const copy = new Date(date)
-  const day = copy.getDay() || 7
-  copy.setDate(copy.getDate() - day + 1)
-  copy.setHours(0, 0, 0, 0)
-  return copy
-}
-
-export function todayIndex(date = new Date()) {
-  return (date.getDay() + 6) % 7
+export function canPostpone(template: CycleTemplate) {
+  return !['rest', 'recovery'].includes(template.kind)
 }
